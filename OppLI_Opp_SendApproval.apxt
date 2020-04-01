@@ -1,0 +1,79 @@
+trigger OppLI_Opp_SendApproval on OpportunityLineItem (after insert,after update) {
+    system.debug('**************************OppLI_Opp_SendApproval Start**************************');
+    if( Trigger.IsInsert || Trigger.IsUpdate ){
+        List<Opportunity> SendForApproval = new List<Opportunity> ();
+        list<String> LString;
+        Map<Id,List<OpportunityLineItem>> MapMasterOpp = new Map<Id,List<OpportunityLineItem>> ();
+        List<OpportunityLineItem> AuxOppLI;
+        
+        
+        for(OpportunityLineItem item : Trigger.new){
+            if(!MapMasterOpp.containsKey(item.OpportunityId)){
+                AuxOppLI = new List<OpportunityLineItem>();
+                AuxOppLI.add(item);
+                MapMasterOpp.put(item.OpportunityId,AuxOppLI);
+            }else{
+                MapMasterOpp.get(item.OpportunityId).add(item);
+            }
+        }
+        
+        Id RecordTypeID = Schema.SObjectType.Opportunity.getRecordTypeInfosByName().get('FTG').getRecordTypeId();
+        Opportunity Opp;
+        
+        for( Id IdItem : MapMasterOpp.keySet()){
+            
+            AuxOppLI = MapMasterOpp.get(IdItem);
+            system.debug(AuxOppLI);
+            Opp = [SELECT ID, OwnerId, RecordTypeId, FTG_Margin__c From Opportunity WHERE ID = :IdItem LIMIT 1];
+            Opp.FTG_Margin__c = Opp.FTG_Margin__c == null ? 0 : Opp.FTG_Margin__c;
+            system.debug('FTG_Margin: '+Opp.FTG_Margin__c);
+            
+            if(Opp.RecordTypeId == RecordTypeID && Opp.FTG_Margin__c < 20){
+                
+                system.debug('OppLI_Opp_SendApproval "Opp.RecordTypeId == RecordTypeID && Opp.FTG_Margin__c < 20": True');
+                Integer RecordsPending = [SELECT Count() From ProcessInstance WHERE TargetObjectId =:IdItem  AND Status='Pending'];
+                Boolean flag = false;
+                
+                if(RecordsPending == 0 ){                   
+                    
+                    for(OpportunityLineItem item : AuxOppLI){
+                        system.debug('OppLI_Opp_SendApproval "UnitPrice != ListPrice":');
+                        if(item.UnitPrice != item.ListPrice){
+                            flag = true;
+                            system.debug(item.Name+': True');
+                        }else{
+                            system.debug(item.Name+': False');
+                        }
+                    }
+                    
+                }else{
+                    System.debug('Record pending approval');
+                }
+                
+                if(flag){
+                    SendForApproval.add(Opp);
+                    
+                    System.debug('Record Preparing approval');
+                }
+            }else{
+                system.debug('OppLI_Opp_SendApproval "Opp.RecordTypeId == RecordTypeID && Opp.FTG_Margin__c < 20: False');
+            }
+            
+        }
+        
+        if(SendForApproval.size() > 0){
+            for(Opportunity OppA : SendForApproval){
+                Approval.ProcessSubmitRequest req = new Approval.ProcessSubmitRequest();
+                req.setProcessDefinitionNameOrId('FTG_margin_below_20');
+                req.setComments('Submitting approval');
+                req.setObjectId(OppA.id);
+                req.setSubmitterId(OppA.OwnerId);
+                Approval.ProcessResult result = Approval.process(req);
+                system.debug('OppLI_Opp_SendApproval send approval:' + result);
+            }            
+        }
+        
+    }
+    
+    system.debug('**************************OppLI_Opp_SendApproval Finish**************************');
+}
