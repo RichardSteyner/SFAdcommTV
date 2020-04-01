@@ -1,0 +1,64 @@
+trigger OLITrigger on OpportunityLineItem (after insert, after update, after delete) {
+    Set<Id> oppIds = new Set<Id>();
+    Map<Id,Opportunity> opps = new Map<Id, Opportunity>();
+    if(Trigger.IsInsert || Trigger.IsUpdate) {
+        for(OpportunityLineItem oli : Trigger.New){
+            oppIds.add(oli.OpportunityId);
+            System.debug(oli.OpportunityId);
+        }
+    }
+    
+    if(Trigger.IsDelete || Trigger.IsUpdate){
+        for(OpportunityLineItem oli : Trigger.Old){
+            oppIds.add(oli.OpportunityId);
+            System.debug(oli.OpportunityId);
+        }
+    }
+    
+    try{
+        String productName = 'Additional Equipment Cost';
+        Opportunity opp;
+        for(AggregateResult ar : [SELECT OpportunityId oppId, SUM(TotalPrice) sumOli  
+                                  FROM OpportunityLineItem 
+                                  WHERE (PricebookEntry.Product2.Family = 'ADDONS' OR PricebookEntry.Product2.Family = 'LABOR' OR PricebookEntry.Product2.Family = 'Com3000' OR PricebookEntry.Product2.Family = 'DRE' OR PricebookEntry.Product2.Family = 'Managed DRE' OR PricebookEntry.Product2.Family = 'AEP' OR PricebookEntry.Product2.Family = 'RHDP' OR PricebookEntry.Product2.Family = 'PPC' OR PricebookEntry.Product2.Family = 'REBATE DEALER') 
+                                    AND OpportunityId in : oppIds And PricebookEntry.Product2.Name != : productName
+                                  GROUP BY OpportunityId]) {
+            if(String.isNotBlank((Id)ar.get('oppId'))) {
+                opp = new Opportunity(); 
+                opp.Id = (Id) ar.get('oppId');
+                opp.Total_Project_Cost__c = (Decimal) ar.get('sumOli');
+                opps.put(opp.Id, opp);
+            }
+        }
+        
+        for(AggregateResult ar : [SELECT OpportunityId oppId, SUM(TotalPrice) sumOli  
+                                  FROM OpportunityLineItem 
+                                  WHERE PricebookEntry.Product2.Family = 'SUBSIDY'
+                                    AND OpportunityId in : oppIds And PricebookEntry.Product2.Name != : productName
+                                  GROUP BY OpportunityId]) {
+            if(String.isNotBlank((Id)ar.get('oppId'))) {
+                opp = new Opportunity(); 
+                opp.Id = (Id) ar.get('oppId');
+                opp.DirecTV_Subsidy__c = (Decimal) ar.get('sumOli');
+                if(opps.get(opp.Id)!=null) opps.get(opp.Id).DirecTV_Subsidy__c = opp.DirecTV_Subsidy__c;
+                else opps.put(opp.Id, opp);
+            }
+        }
+        
+        for(Id auxId : oppIds){
+            if(opps.get(auxId)!=null){
+                if(opps.get(auxId).Total_Project_Cost__c == null) 
+                    opps.get(auxId).Total_Project_Cost__c=0.0;
+                if(opps.get(auxId).DirecTV_Subsidy__c == null) 
+                    opps.get(auxId).DirecTV_Subsidy__c=0.0;
+            }else{
+                opps.put(auxId, new Opportunity(Id=auxId, Total_Project_Cost__c=0.0, DirecTV_Subsidy__c=0.0));
+            }
+        }
+        if(opps.size()>0)
+            update opps.values();
+    }catch(Exception e){
+        System.debug('Exception: ' + e.getLineNumber() + ' - ' + e.getMessage());
+    }
+ 
+}
