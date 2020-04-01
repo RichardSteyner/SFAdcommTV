@@ -1,0 +1,4 @@
+public class ApexUtil {
+    public static boolean isOpportunityTriggerInvoked = true;
+    public static boolean isQuoteTriggerInvoked = true;
+}
