@@ -47,7 +47,7 @@ trigger OppLI_Opp_SendApproval on OpportunityLineItem (after insert,after update
                     }
                     
                 }else{
-                    System.debug('Record pending approval');
+                    System.debug('Record pending approval.');
                 }
                 
                 if(flag){
