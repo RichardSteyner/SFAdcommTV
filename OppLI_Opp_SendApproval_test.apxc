@@ -1,0 +1,74 @@
+@isTest
+public class OppLI_Opp_SendApproval_test {
+    @testSetup static void setup(){
+        List<Opportunity> ListOpp = new List<Opportunity> () ;
+        List<OpportunityLineItem> ListOppLI = new  List<OpportunityLineItem> ();        
+        Opportunity Opp;
+        OpportunityLineItem OppLI,OppLI2;
+        
+        Product2 Pro = new Product2(Name='TestProduct');
+        insert Pro;
+        Product2 Pro2 = new Product2(Name='TestProduct2');
+        insert Pro2;
+        System.debug(Pro);
+        
+        
+        Pricebook2 book = new Pricebook2(Name='Standard Price Book',IsActive=true);
+        insert book;
+        
+        
+        System.debug(book);
+        
+        PricebookEntry PBE = new PricebookEntry(Product2Id=pro.Id, Pricebook2Id=Test.getStandardPricebookId(),UnitPrice=100,isActive=true);
+        insert PBE;
+        
+        PricebookEntry PBE2 = new PricebookEntry(Product2Id=pro2.Id, Pricebook2Id=Test.getStandardPricebookId(),UnitPrice=100,isActive=true);
+        insert PBE2;
+        
+        for(Integer i = 0 ; i < 3 ; i++){
+            Opp = new Opportunity();
+            Opp.Name = 'TestOpportunity'+(i+1);
+            Opp.StageName = 'Proposal';
+            Opp.FTG_Margin__c = i + 18;
+            Opp.RecordTypeId = Schema.SObjectType.Opportunity.getRecordTypeInfosByName().get('FTG').getRecordTypeId();
+            Opp.CloseDate = system.today();
+                
+            ListOpp.add(Opp);
+        }
+        
+        insert ListOpp;
+        System.debug(ListOpp);
+        for(Integer j = 0 ; j < 3 ; j++){
+            
+            OppLI  = new OpportunityLineItem();
+            OppLi.OpportunityId = (Id)ListOpp[j].get('Id');
+            OppLi.PricebookEntryId = Book.ID;
+            OppLi.Product2Id = PBE.Id;
+            OppLI.UnitPrice = 20;
+            OppLi.Quantity = 2;
+            
+            
+            OppLI2  = new OpportunityLineItem();
+            OppLi2.OpportunityId = (Id)ListOpp[j].get('Id');
+            OppLi2.PricebookEntryId = Book.ID;
+            OppLi2.Product2Id = PBE2.Id;
+            OppLI2.UnitPrice = 100;
+            OppLi2.Quantity = 2;
+            
+            ListOppLI.add(OppLI);
+            ListOppLI.add(OppLI2);
+
+        }
+        insert ListOppLI;
+        System.debug(ListOppLI);
+    }
+    
+    @isTest static void testTrigger(){
+        Test.startTest();
+        List<Opportunity> ListOpp = [SELECT ID FROM Opportunity];
+        Integer RecordsPending = [SELECT Count() From ProcessInstance WHERE TargetObjectId IN :ListOpp  AND Status='Pending'];
+        system.debug(RecordsPending);
+        //System.assertEquals(2, RecordsPending); Activate if active trigger
+        Test.stopTest();    
+    }
+}
