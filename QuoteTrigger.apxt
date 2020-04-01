@@ -1,0 +1,66 @@
+trigger QuoteTrigger on Quote (after insert, after update) {
+    if(ApexUtil.isQuoteTriggerInvoked == true){
+        Map<Id,Quote> quotes = new Map<Id, Quote>();
+        if(Trigger.IsInsert || Trigger.IsUpdate) {
+            for(Quote q : Trigger.New){
+                if(q.Total_Amount_to_Client__c!=null && q.Total_Amount_to_Client__c>0 && (q.Total_Amount_to_Client__c-(q.Summarize_Products__c!=null ? q.Summarize_Products__c : 0))>0){
+                    quotes.put(q.Id, q.clone(true));
+                    System.debug(q.Id);
+                }
+            }
+        }
+        
+        try{
+            System.debug(quotes.values());
+            Set<String> pricebooks = new Set<String>();
+            List<Pricebook2> listPricebook = [Select Id From Pricebook2 WHERE Name = 'Standard Price Book'];
+            String pricebook2IdAux = listPricebook.get(0).Id;
+            List<Quote> qList = new List<Quote>();
+            for(Quote q : quotes.values()){
+                if(q.Pricebook2Id==null){
+                    q.Pricebook2Id = pricebook2IdAux;
+                    qList.add(q);
+                }
+                pricebooks.add(q.Pricebook2Id);
+            }
+            System.debug('qList: ' + qList);
+            ApexUtil.isQuoteTriggerInvoked = false;
+            if(qList.size()>0) update qList;
+            String productName = 'Additional Equipment Cost';
+            Map<String, String> mapPricebookEntry = new Map<String, String>();
+            for(PricebookEntry pbe : [Select Id, Pricebook2Id From PricebookEntry WHERE Product2.Name =: productName AND isActive=true AND Pricebook2Id in : pricebooks]){
+                mapPricebookEntry.put(pbe.Pricebook2Id, pbe.Id);
+            }
+            System.debug('mapPricebookEntry: ' + mapPricebookEntry);
+            Map<Id, QuoteLineItem> qliToUpdate = new Map<ID, QuoteLineItem>();
+            for(QuoteLineItem ql : [select Id, QuoteId FROM QuoteLineItem where QuoteId in : quotes.keySet() and PricebookEntry.Product2.Name =: productName]){
+                qliToUpdate.put(ql.QuoteId, ql);
+            }
+            List<QuoteLineItem> qliList = new List<QuoteLineItem>();
+            QuoteLineItem qli;
+            for(Quote q : quotes.values()){
+                if(mapPricebookEntry.get(q.Pricebook2Id)!=null){
+                    qli = new QuoteLineItem();
+                    qli.PricebookEntryId = mapPricebookEntry.get(q.Pricebook2Id);
+                    qli.Quantity = 1;
+                    qli.QuoteId = q.Id;
+                    System.debug('Resta: ' + (q.Total_Amount_to_Client__c-(q.Summarize_Products__c!=null ? q.Summarize_Products__c : 0)));
+                    qli.UnitPrice = (q.Total_Amount_to_Client__c-(q.Summarize_Products__c!=null ? q.Summarize_Products__c : 0));
+                    if(qliToUpdate.get(q.Id)!=null) {
+                        qli.Id = qliToUpdate.get(q.Id).Id;
+                        qliToUpdate.put(q.Id, qli);
+                    }else
+                        qliList.add(qli);
+                }
+            }
+            System.debug('qliList: ' + qliList);
+            System.debug('qliToUpdate: ' + qliToUpdate.values());
+            if(qliList.size()>0)
+                insert qliList;
+            if(qliToUpdate.values().size()>0)
+                update qliToUpdate.values();
+        }catch(Exception e){
+            System.debug('Exception QuoteTrigger: ' + e.getLineNumber() + ' - ' + e.getMessage());
+        }
+    }
+}
