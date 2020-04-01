@@ -1,0 +1,88 @@
+trigger OpportunityTrigger on Opportunity (after insert, after update) {
+	if(ApexUtil.isOpportunityTriggerInvoked == true){
+        Map<Id,Opportunity> opps = new Map<Id, Opportunity>();
+        Map<Id,Opportunity> oppCalculations = new Map<Id, Opportunity>();
+        if(Trigger.IsInsert || Trigger.IsUpdate) {
+            for(Opportunity o : Trigger.New){
+                if(o.Total_Amount_to_Client__c!=null && o.Total_Amount_to_Client__c>0 /*&& (o.Total_Amount_to_Client__c - (o.Total_Project_Cost__c!=null ? o.Total_Project_Cost__c : 0))>0*/){
+                    opps.put(o.Id, o.clone(true));
+                    System.debug(o.Id);
+                }
+                oppCalculations.put(o.Id, new Opportunity(Id=o.Id, Total_Project_Cost__c=o.Total_Project_Cost__c!=null ? o.Total_Project_Cost__c : 0, Unit_Count__c=o.Unit_Count__c));
+            }
+        }
+        
+        try{
+            System.debug(opps.values());
+            System.debug(oppCalculations.values());
+            Decimal auxUnitCount;
+            for(Opportunity o : oppCalculations.values()){
+                auxUnitCount = (o.Unit_Count__c==null || o.Unit_Count__c==0 ? 1 : o.Unit_Count__c);
+                if(o.Total_Project_Cost__c>10000){
+                    o.Ascentium_Capital_Calculator_Apex__c = (o.Total_Project_Cost__c * 0.025)/auxUnitCount;
+                    o.X24_Month_Financing_Apex__c = (o.Total_Project_Cost__c * 0.04656)/auxUnitCount;
+                    o.X36_month_Financing_Apex__c = (o.Total_Project_Cost__c * 0.03212)/auxUnitCount;
+                    o.X48_month_Financing_Apex__c = (o.Total_Project_Cost__c * 0.0249)/auxUnitCount;
+                    o.X60_month_Financing_Apex__c = (o.Total_Project_Cost__c * 0.0206)/auxUnitCount;
+                } else {
+                    o.Ascentium_Capital_Calculator_Apex__c = (o.Total_Project_Cost__c *  0.22222)/auxUnitCount;
+                    o.X24_Month_Financing_Apex__c = (o.Total_Project_Cost__c * 0.04955)/auxUnitCount;
+                    o.X36_month_Financing_Apex__c = (o.Total_Project_Cost__c * 0.03212)/auxUnitCount;
+                    o.X48_month_Financing_Apex__c = (o.Total_Project_Cost__c * 0.02711)/auxUnitCount;
+                    o.X60_month_Financing_Apex__c = (o.Total_Project_Cost__c * 0.02266)/auxUnitCount;
+                }
+            }
+            ApexUtil.isOpportunityTriggerInvoked = false;
+            if(oppCalculations.values().size()>0) update oppCalculations.values();
+            Set<String> pricebooks = new Set<String>();
+            List<Pricebook2> listPricebook = [Select Id From Pricebook2 WHERE Name = 'Standard Price Book'];
+            String pricebook2IdAux = listPricebook.get(0).Id;
+            List<Opportunity> oList = new List<Opportunity>();
+            for(Opportunity o : opps.values()){
+                if(o.Pricebook2Id==null){
+                    o.Pricebook2Id = pricebook2IdAux;
+                    oList.add(o);
+                }
+                pricebooks.add(o.Pricebook2Id);
+            }
+            System.debug('oList: ' + oList);
+            ApexUtil.isOpportunityTriggerInvoked = false;
+            if(oList.size()>0) update oList;
+            String productName = 'Additional Equipment Cost';
+            Map<String, String> mapPricebookEntry = new Map<String, String>();
+            for(PricebookEntry pbe : [Select Id, Pricebook2Id From PricebookEntry WHERE Product2.Name =: productName AND isActive=true AND Pricebook2Id in : pricebooks]){
+                mapPricebookEntry.put(pbe.Pricebook2Id, pbe.Id);
+            }
+            System.debug('mapPricebookEntry: ' + mapPricebookEntry);
+            Map<Id, OpportunityLineItem> oliToUpdate = new Map<ID, OpportunityLineItem>();
+            for(OpportunityLineItem ol : [select Id, OpportunityId FROM OpportunityLineItem where OpportunityId in : opps.keySet() and PricebookEntry.Product2.Name =: productName]){
+                oliToUpdate.put(ol.OpportunityId, ol);
+            }
+            List<OpportunityLineItem> oliList = new List<OpportunityLineItem>();
+            OpportunityLineItem oli;
+            for(Opportunity o : opps.values()){
+                if(mapPricebookEntry.get(o.Pricebook2Id)!=null){
+                    oli = new OpportunityLineItem();
+                    oli.PricebookEntryId = mapPricebookEntry.get(o.Pricebook2Id);
+                    oli.Quantity = 1;
+                    oli.OpportunityId = o.Id;
+                    System.debug('Resta: ' + (o.Total_Amount_to_Client__c- (o.Total_Project_Cost__c!=null ? o.Total_Project_Cost__c : 0)));
+                    oli.UnitPrice = (o.Total_Amount_to_Client__c- (o.Total_Project_Cost__c!=null ? o.Total_Project_Cost__c : 0));
+                    if(oliToUpdate.get(o.Id)!=null) {
+                        oli.Id = oliToUpdate.get(o.Id).Id;
+                        oliToUpdate.put(o.Id, oli);
+                    }else
+                        oliList.add(oli);
+                }
+            }
+            System.debug('oliList: ' + oliList);
+            System.debug('oliToUpdate: ' + oliToUpdate.values());
+            if(oliList.size()>0)
+                insert oliList;
+            if(oliToUpdate.values().size()>0)
+                update oliToUpdate.values();
+        }catch(Exception e){
+            System.debug('Exception OpportunityTrigger: ' + e.getLineNumber() + ' - ' + e.getMessage());
+        }
+    }
+}
