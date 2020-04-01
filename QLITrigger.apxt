@@ -1,0 +1,95 @@
+trigger QLITrigger on QuoteLineItem (after insert, after update, after delete) {
+    Set<Id> qIds = new Set<Id>();
+    Map<Id,Quote> quotes = new Map<Id, Quote>();
+    if(Trigger.IsInsert || Trigger.IsUpdate) {
+        for(QuoteLineItem qli : Trigger.New){
+            qIds.add(qli.QuoteId);
+            System.debug(qli.QuoteId);
+        }
+    }
+    
+    if(Trigger.IsDelete || Trigger.IsUpdate){
+        for(QuoteLineItem qli : Trigger.Old){
+            qIds.add(qli.quoteId);
+            System.debug(qli.QuoteId);
+        }
+    }
+    
+    try{
+        String productName = 'Additional Equipment Cost';
+        Quote q;
+        for(AggregateResult ar : [SELECT QuoteId qId, SUM(TotalPrice) sumQli  
+                                  FROM QuoteLineItem 
+                                  WHERE (PricebookEntry.Product2.Family = 'ADDONS' OR PricebookEntry.Product2.Family = 'LABOR' OR PricebookEntry.Product2.Family = 'Com3000' OR PricebookEntry.Product2.Family = 'DRE' OR PricebookEntry.Product2.Family = 'Managed DRE' OR PricebookEntry.Product2.Family = 'AEP' OR PricebookEntry.Product2.Family = 'RHDP' OR PricebookEntry.Product2.Family = 'PPC' OR PricebookEntry.Product2.Family = 'REBATE DEALER') 
+                                    AND QuoteId in : qIds And PricebookEntry.Product2.Name != : productName
+                                  GROUP BY QuoteId]) {
+            if(String.isNotBlank((Id)ar.get('qId'))) {
+                q = new Quote(); 
+                q.Id = (Id) ar.get('qId');
+                q.Total_Project_Cost__c = (Decimal) ar.get('sumQli');
+                quotes.put(q.Id, q);
+            }
+        }
+        
+        for(AggregateResult ar : [SELECT QuoteId qId, SUM(TotalPrice) sumQli  
+                                  FROM QuoteLineItem 
+                                  WHERE PricebookEntry.Product2.Family = 'SUBSIDY'
+                                    AND QuoteId in : qIds And PricebookEntry.Product2.Name != : productName
+                                  GROUP BY QuoteId]) {
+            if(String.isNotBlank((Id)ar.get('qId'))) {
+                q = new Quote(); 
+                q.Id = (Id) ar.get('qId');
+                q.DirecTV_Subsidy__c = (Decimal) ar.get('sumQli');
+                if(quotes.get(q.Id)!=null) quotes.get(q.Id).DirecTV_Subsidy__c = q.DirecTV_Subsidy__c;
+                else quotes.put(q.Id, q);
+            }
+        }
+        
+        for(AggregateResult ar : [SELECT QuoteId qId, SUM(TotalPrice) sumQli  
+                                  FROM QuoteLineItem 
+                                  WHERE PricebookEntry.Product2.Name != : productName
+                                    AND QuoteId in : qIds
+                                  GROUP BY QuoteId]) {
+            if(String.isNotBlank((Id)ar.get('qId'))) {
+                q = new Quote(); 
+                q.Id = (Id) ar.get('qId');
+                q.Summarize_Products__c = (Decimal) ar.get('sumQli');
+                if(quotes.get(q.Id)!=null) quotes.get(q.Id).Summarize_Products__c = q.Summarize_Products__c;
+                else quotes.put(q.Id, q);
+            }
+        }
+        
+        for(AggregateResult ar : [SELECT QuoteId qId, SUM(TotalPrice) sumQli  
+                                  FROM QuoteLineItem 
+                                  WHERE QuoteId in : qIds
+                                  GROUP BY QuoteId]) {
+            if(String.isNotBlank((Id)ar.get('qId'))) {
+                q = new Quote(); 
+                q.Id = (Id) ar.get('qId');
+                q.Summarize_All_Products__c = (Decimal) ar.get('sumQli');
+                if(quotes.get(q.Id)!=null) quotes.get(q.Id).Summarize_All_Products__c = q.Summarize_All_Products__c;
+                else quotes.put(q.Id, q);
+            }
+        }
+        
+        for(Id auxId : qIds){
+            if(quotes.get(auxId)!=null){
+                if(quotes.get(auxId).Total_Project_Cost__c == null) 
+                    quotes.get(auxId).Total_Project_Cost__c=0.0;
+                if(quotes.get(auxId).DirecTV_Subsidy__c == null) 
+                    quotes.get(auxId).DirecTV_Subsidy__c=0.0;
+                if(quotes.get(auxId).Summarize_Products__c == null) 
+                    quotes.get(auxId).Summarize_Products__c=0.0;
+                if(quotes.get(auxId).Summarize_All_Products__c == null) 
+                    quotes.get(auxId).Summarize_All_Products__c=0.0;
+            }else{
+                quotes.put(auxId, new Quote(Id=auxId, Total_Project_Cost__c=0.0, DirecTV_Subsidy__c=0.0, Summarize_Products__c=0.0, Summarize_All_Products__c=0.0));
+            }
+        }
+        ApexUtil.isQuoteTriggerInvoked = false;
+        if(quotes.size()>0)
+            update quotes.values();
+    }catch(Exception e){
+        System.debug('Exception: ' + e.getLineNumber() + ' - ' + e.getMessage());
+    }
+}
